@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15.4
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+    ports:
+      - "5432:5432"
+  
+  keycloak:
+    image: quay.io/keycloak/keycloak:22.0.1
+    hostname: keycloak
+    # volumes:
+    #   - $PWD/infinispan-custom.xml:/opt/keycloak/conf/cache-ispn.xml
+    environment:
+      KC_HOSTNAME_STRICT: false
+      KC_HOSTNAME_STRICT_HTTPS: false
+      KC_HOSTNAME_STRICT_BACKCHANNEL: false
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_SCHEMA: public
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      KC_HTTP_ENABLED: true
+      # Proxy
+      VIRTUAL_PORT: 8080
+      VIRTUAL_HOST: localhost
+    depends_on:
+      - postgres
+      - infinispan
+    # --cache-config-file=cache-ispn.xml --storage-hotrod-host=infinispan --storage-hotrod-port=11222 --optimized
+    entrypoint: 'bash -c "if [ ! -f "/opt/keycloak/conf/server.keystore" ]; then keytool -genkeypair -storepass password -storetype PKCS12 -keyalg RSA -keysize 2048 -dname "CN=server" -alias server -ext "SAN:c=DNS:localhost,IP:127.0.0.1" -keystore /opt/keycloak/conf/server.keystore; fi; /opt/keycloak/bin/kc.sh --verbose start --cache=ispn --proxy=edge --storage=hotrod --storage-hotrod-host=infinispan --storage-hotrod-username=admin --storage-hotrod-password=admin"'
+
+  infinispan:
+    image: quay.io/infinispan/server:14.0.19.Final
+    ports:
+      - 11222:11222
+    volumes:
+      # https://infinispan.org/docs/14.0.x/titles/server/server.html#configuring-server-datasources_managed-datasources
+      - ./postgresql-42.2.20.jar:/opt/infinispan/server/lib/postgresql-42.2.20.jar
+      - ./infinispan-custom.xml:/opt/infinispan/server/conf/infinispan-custom.xml
+      - ./infinispan-jgroups.xml:/opt/infinispan/server/conf/jgroups.xml
+    entrypoint: ["/opt/infinispan/bin/server.sh", "-c", "infinispan-custom.xml"]
+    depends_on:
+      - postgres
+    # network_mode: host
+  
+  proxy:
+    image: jwilder/nginx-proxy:1.3.1
+    container_name: proxy
+    environment:
+      - DEFAULT_HOST=localhost
+    ports:
+      - "8080:80"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
